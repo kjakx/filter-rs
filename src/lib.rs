@@ -16,17 +16,17 @@ pub enum IIRBiquadKind {
 }
 
 pub struct IIRBiquad {
-    a: [f64; 3],
+    a: [f64; 2],
     b: [f64; 3],
     input_buffer: dasp_ring_buffer::Fixed<[f64; 3]>,
-    output_buffer: dasp_ring_buffer::Fixed<[f64; 3]>,
+    output_buffer: dasp_ring_buffer::Fixed<[f64; 2]>,
 }
 
 impl IIRBiquad {
     pub fn new(kind: IIRBiquadKind, fc: f64, q: f64, sample_rate: usize) -> Self {
         let (a, b) = Self::_calc_coefs(kind, fc, q, sample_rate);
         let input_buffer = dasp_ring_buffer::Fixed::from([0.0; 3]);
-        let output_buffer = dasp_ring_buffer::Fixed::from([0.0; 3]);
+        let output_buffer = dasp_ring_buffer::Fixed::from([0.0; 2]);
         IIRBiquad {
             a,
             b,
@@ -41,42 +41,42 @@ impl IIRBiquad {
 
     pub fn reset_buffer(&mut self) {
         self.input_buffer = dasp_ring_buffer::Fixed::from([0.0; 3]);
-        self.output_buffer = dasp_ring_buffer::Fixed::from([0.0; 3]);
+        self.output_buffer = dasp_ring_buffer::Fixed::from([0.0; 2]);
     }
 
-    fn _calc_coefs(kind: IIRBiquadKind, fc: f64, q: f64, sample_rate: usize) -> ([f64; 3], [f64; 3]) {
+    fn _calc_coefs(kind: IIRBiquadKind, fc: f64, q: f64, sample_rate: usize) -> ([f64; 2], [f64; 3]) {
         let fc = 0.5 * (fc * PI / sample_rate as f64).tan() / PI;
-        let mut a = [0.0; 3];
+        let mut a = [0.0; 2];
         let mut b = [0.0; 3];
         match kind {
             IIRBiquadKind::LPF => {
                 let denom = 1.0 + 2.0 * PI * fc / q + 4.0 * PI * PI * fc * fc;
-                a[1] = (8.0 * PI * PI * fc * fc - 2.0) / denom;
-                a[2] = (1.0 - 2.0 * PI * fc / q + 4.0 * PI * PI * fc * fc) / denom;
+                a[0] = (8.0 * PI * PI * fc * fc - 2.0) / denom;
+                a[1] = (1.0 - 2.0 * PI * fc / q + 4.0 * PI * PI * fc * fc) / denom;
                 b[0] = 4.0 * PI * PI * fc * fc / denom;
                 b[1] = 8.0 * PI * PI * fc * fc / denom;
                 b[2] = 4.0 * PI * PI * fc * fc / denom;
             },
             IIRBiquadKind::HPF => {
                 let denom = 1.0 + 2.0 * PI * fc / q + 4.0 * PI * PI * fc * fc;
-                a[1] = (8.0 * PI * PI * fc * fc - 2.0) / denom;
-                a[2] = (1.0 - 2.0 * PI * fc / q + 4.0 * PI * PI * fc * fc) / denom;
+                a[0] = (8.0 * PI * PI * fc * fc - 2.0) / denom;
+                a[1] = (1.0 - 2.0 * PI * fc / q + 4.0 * PI * PI * fc * fc) / denom;
                 b[0] = 1.0 / denom;
                 b[1] = -2.0 / denom;
                 b[2] = 1.0 / denom;
             },
             IIRBiquadKind::BPF => {
                 let denom = 1.0 + 2.0 * PI * fc / q + 4.0 * PI * PI * fc * fc;
-                a[1] = (8.0 * PI * PI * fc * fc - 2.0) / denom;
-                a[2] = (1.0 - 2.0 * PI * fc / q + 4.0 * PI * PI * fc * fc) / denom;
+                a[0] = (8.0 * PI * PI * fc * fc - 2.0) / denom;
+                a[1] = (1.0 - 2.0 * PI * fc / q + 4.0 * PI * PI * fc * fc) / denom;
                 b[0] = (2.0 * PI * fc / q) / denom;
                 // b[1] = 0.0;
                 b[2] = (-2.0 * PI * fc / q) / denom;
             },
             IIRBiquadKind::BEF => {
                 let denom = 1.0 + 2.0 * PI * fc / q + 4.0 * PI * PI * fc * fc;
-                a[1] = (8.0 * PI * PI * fc * fc - 2.0) / denom;
-                a[2] = (1.0 - 2.0 * PI * fc / q + 4.0 * PI * PI * fc * fc) / denom;
+                a[0] = (8.0 * PI * PI * fc * fc - 2.0) / denom;
+                a[1] = (1.0 - 2.0 * PI * fc / q + 4.0 * PI * PI * fc * fc) / denom;
                 b[0] = (4.0 * PI * PI * fc * fc + 1.0) / denom;
                 b[1] = (8.0 * PI * PI * fc * fc - 2.0) / denom;
                 b[2] = (4.0 * PI * PI * fc * fc + 1.0) / denom; 
@@ -91,11 +91,11 @@ impl Filter for IIRBiquad {
     
     fn process(&mut self, input: Self::Item) -> Self::Item {
         self.input_buffer.push(input);
-        let mut output = self.b[0] * self.input_buffer[2]
+        let output = self.b[0] * self.input_buffer[2]
                        + self.b[1] * self.input_buffer[1]
-                       + self.b[2] * self.input_buffer[0];
-        output += - self.a[1] * self.output_buffer[2]
-                  - self.a[2] * self.output_buffer[1];
+                       + self.b[2] * self.input_buffer[0]
+                       - self.a[0] * self.output_buffer[1]
+                       - self.a[1] * self.output_buffer[0];
         self.output_buffer.push(output);
         output
     }
