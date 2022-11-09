@@ -92,10 +92,10 @@ impl Filter for IIRBiquad {
     fn process(&mut self, input: Self::Item) -> Self::Item {
         self.input_buffer.push(input);
         let output = self.b[0] * self.input_buffer[2]
-                       + self.b[1] * self.input_buffer[1]
-                       + self.b[2] * self.input_buffer[0]
-                       - self.a[0] * self.output_buffer[1]
-                       - self.a[1] * self.output_buffer[0];
+                   + self.b[1] * self.input_buffer[1]
+                   + self.b[2] * self.input_buffer[0]
+                   - self.a[0] * self.output_buffer[1]
+                   - self.a[1] * self.output_buffer[0];
         self.output_buffer.push(output);
         output
     }
