@@ -1,11 +1,5 @@
-use std::f64::consts::PI;
+use std::f32::consts::PI;
 use dasp_ring_buffer;
-
-pub trait Filter {
-    type Item;
-
-    fn process(&mut self, input: Self::Item) -> Self::Item;
-}
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum IIRBiquadKind {
@@ -15,37 +9,86 @@ pub enum IIRBiquadKind {
     BEF,
 }
 
-pub struct IIRBiquad {
-    a: [f64; 2],
-    b: [f64; 3],
-    input_buffer: dasp_ring_buffer::Fixed<[f64; 3]>,
-    output_buffer: dasp_ring_buffer::Fixed<[f64; 2]>,
+#[derive(Copy, Clone, PartialEq)]
+pub enum IIRBiquadChannel {
+    Mono = 1,
+    Stereo = 2,
 }
 
-impl IIRBiquad {
-    pub fn new(kind: IIRBiquadKind, fc: f64, q: f64, sample_rate: usize) -> Self {
-        let (a, b) = Self::_calc_coefs(kind, fc, q, sample_rate);
-        let input_buffer = dasp_ring_buffer::Fixed::from([0.0; 3]);
-        let output_buffer = dasp_ring_buffer::Fixed::from([0.0; 2]);
-        IIRBiquad {
-            a,
-            b,
-            input_buffer,
-            output_buffer,
+#[derive(Clone)]
+pub struct IIRBiquadProcessor {
+    input_buffer : dasp_ring_buffer::Fixed<[f32; 3]>,
+    output_buffer: dasp_ring_buffer::Fixed<[f32; 2]>,
+}
+
+impl IIRBiquadProcessor {
+    pub fn new() -> Self {
+        IIRBiquadProcessor {
+            input_buffer : dasp_ring_buffer::Fixed::from([0.0; 3]),
+            output_buffer: dasp_ring_buffer::Fixed::from([0.0; 2]),
         }
     }
 
-    pub fn update(&mut self, kind: IIRBiquadKind, fc: f64, q: f64, sample_rate: usize) {
-        (self.a, self.b) = Self::_calc_coefs(kind, fc, q, sample_rate);
+    pub fn process(&mut self, input: f32, coefs: &IIRBiquadCoefficients) -> f32 {
+        self.input_buffer.push(input);
+        let output = coefs.b[0] * self.input_buffer[2]
+                   + coefs.b[1] * self.input_buffer[1]
+                   + coefs.b[2] * self.input_buffer[0]
+                   - coefs.a[0] * self.output_buffer[1]
+                   - coefs.a[1] * self.output_buffer[0];
+        self.output_buffer.push(output);
+        output
+    }
+}
+
+pub struct IIRBiquadCoefficients {
+    a: [f32; 2],
+    b: [f32; 3],
+}
+
+pub struct IIRBiquad {
+    kind: IIRBiquadKind,
+    coefs: IIRBiquadCoefficients,
+    processors: Vec<IIRBiquadProcessor>,
+    sample_rate: f32,
+}
+
+impl IIRBiquad {
+    pub fn new(kind: IIRBiquadKind, fc: f32, q: f32, channel: IIRBiquadChannel, sample_rate: f32) -> Self {
+        let coefs = Self::_calc_coefs(kind, fc, q, sample_rate);
+        let processors = vec![IIRBiquadProcessor::new(); channel as usize];
+        IIRBiquad {
+            kind,
+            coefs,
+            processors,
+            sample_rate,
+        }
     }
 
-    pub fn reset_buffer(&mut self) {
-        self.input_buffer = dasp_ring_buffer::Fixed::from([0.0; 3]);
-        self.output_buffer = dasp_ring_buffer::Fixed::from([0.0; 2]);
+    pub fn update(&mut self, fc: f32, q: f32) {
+        self.coefs = Self::_calc_coefs(self.kind, fc, q, self.sample_rate);
     }
 
-    fn _calc_coefs(kind: IIRBiquadKind, fc: f64, q: f64, sample_rate: usize) -> ([f64; 2], [f64; 3]) {
-        let fc = 0.5 * (fc * PI / sample_rate as f64).tan() / PI;
+    pub fn change_kind(&mut self, kind: IIRBiquadKind) {
+        self.kind = kind;
+    }
+
+    pub fn change_sample_rate(&mut self, sample_rate: f32) {
+        self.sample_rate = sample_rate;
+    }
+
+    // TODO: use dasp_frame
+    pub fn process(&mut self, input: Vec<f32>) -> Vec<f32> {
+        self.processors.iter_mut()
+        .zip(input.iter())
+        .map(|(p, i)| {
+            p.process(*i, &self.coefs)
+        })
+        .collect::<Vec<f32>>()
+    }
+
+    fn _calc_coefs(kind: IIRBiquadKind, fc: f32, q: f32, sample_rate: f32) -> IIRBiquadCoefficients {
+        let fc = 0.5 * (fc * PI / sample_rate).tan() / PI;
         let mut a = [0.0; 2];
         let mut b = [0.0; 3];
         match kind {
@@ -82,22 +125,7 @@ impl IIRBiquad {
                 b[2] = (4.0 * PI * PI * fc * fc + 1.0) / denom; 
             }
         }
-        (a, b)
-    }
-}
-
-impl Filter for IIRBiquad {
-    type Item = f64;
-    
-    fn process(&mut self, input: Self::Item) -> Self::Item {
-        self.input_buffer.push(input);
-        let output = self.b[0] * self.input_buffer[2]
-                   + self.b[1] * self.input_buffer[1]
-                   + self.b[2] * self.input_buffer[0]
-                   - self.a[0] * self.output_buffer[1]
-                   - self.a[1] * self.output_buffer[0];
-        self.output_buffer.push(output);
-        output
+        IIRBiquadCoefficients { a, b }
     }
 }
 
@@ -110,20 +138,31 @@ mod tests {
         use hound;
         let mut reader = hound::WavReader::open("wav/sine_500hz_3500hz.wav").unwrap();
         let spec = reader.spec();
-        let samples: Vec<f64> = reader.samples().map(|x: Result<i16, hound::Error>| {
-            x.unwrap() as f64 / i16::MAX as f64
+        let samples: Vec<f32> = reader.samples().map(|x: Result<i16, hound::Error>| {
+            x.unwrap() as f32 / i16::MAX as f32
         }).collect();
-        let mut iir_biquad = IIRBiquad::new(IIRBiquadKind::LPF, 1000.0, 1.0 / 2.0_f64.sqrt(), spec.sample_rate as usize);
-        let lowpassed: Vec<f64> = samples.iter().map(|s| iir_biquad.process(*s)).collect();
+        let mut iir_biquad = IIRBiquad::new(
+            IIRBiquadKind::LPF,
+            1000.0,
+            1.0 / 2.0_f32.sqrt(), 
+            IIRBiquadChannel::Mono,
+            spec.sample_rate as f32
+        );
+
+        // apply low-pass filter
+        let lowpassed: Vec<Vec<f32>> = samples.iter().map(|s| iir_biquad.process(vec![*s])).collect();
         let mut writer = hound::WavWriter::create("wav/lowpass.wav", spec).unwrap();
         for s in lowpassed.iter() {
-            writer.write_sample((i16::MAX as f64 * *s) as i16).unwrap();
+            writer.write_sample((i16::MAX as f32 * s[0]) as i16).unwrap();
         }
-        iir_biquad.update(IIRBiquadKind::HPF, 1000.0, 1.0 / 2.0_f64.sqrt(), spec.sample_rate as usize);
-        let highpassed: Vec<f64> = samples.iter().map(|s| iir_biquad.process(*s)).collect();
+        
+        // apply high-pass filter
+        iir_biquad.change_kind(IIRBiquadKind::HPF);
+        iir_biquad.update(1000.0, 1.0 / 2.0_f32.sqrt());
+        let highpassed: Vec<Vec<f32>> = samples.iter().map(|s| iir_biquad.process(vec![*s])).collect();
         let mut writer = hound::WavWriter::create("wav/highpass.wav", spec).unwrap();
         for s in highpassed.iter() {
-            writer.write_sample((i16::MAX as f64 * *s) as i16).unwrap();
+            writer.write_sample((i16::MAX as f32 * s[0]) as i16).unwrap();
         }
 
     }
