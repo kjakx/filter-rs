@@ -56,6 +56,8 @@ pub struct IIRBiquadCoefficients {
 
 pub struct IIRBiquad {
     kind: IIRBiquadKind,
+    fc: f32,
+    q: f32,
     coefs: IIRBiquadCoefficients,
     processors: Vec<IIRBiquadProcessor>,
     sample_rate: f32,
@@ -67,6 +69,8 @@ impl IIRBiquad {
         let processors = vec![IIRBiquadProcessor::new(); channel as usize];
         IIRBiquad {
             kind,
+            fc,
+            q,
             coefs,
             processors,
             sample_rate,
@@ -79,11 +83,13 @@ impl IIRBiquad {
 
     pub fn change_kind(&mut self, kind: IIRBiquadKind) {
         self.kind = kind;
+        self.update(self.fc, self.q);
         self.processors.iter_mut().for_each(|p| p.reset());
     }
 
     pub fn change_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate;
+        self.update(self.fc, self.q);
     }
 
     // TODO: use dasp_frame
@@ -170,7 +176,6 @@ mod tests {
         
         // apply high-pass filter
         iir_biquad.change_kind(IIRBiquadKind::HPF);
-        iir_biquad.update(1000.0, 1.0 / 2.0_f32.sqrt());
         let highpassed: Vec<Vec<f32>> = samples.iter().map(|s| iir_biquad.process(vec![*s])).collect();
         let mut writer = hound::WavWriter::create("wav/highpass.wav", spec).unwrap();
         for s in highpassed.iter() {
