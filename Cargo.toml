@@ -8,3 +8,6 @@ edition = "2021"
 [dependencies]
 dasp_ring_buffer = "*"
 hound = "*"
+dasp_signal = "*"
+dasp_sample = "*"
+dasp_frame = "*"
