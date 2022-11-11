@@ -1,5 +1,8 @@
 use std::f32::consts::PI;
 use dasp_ring_buffer;
+use dasp_signal::{self as signal, Signal};
+use dasp_sample::Sample;
+use dasp_frame::Frame;
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum IIRBiquadKind {
@@ -39,6 +42,11 @@ impl IIRBiquadProcessor {
         self.output_buffer.push(output);
         output
     }
+
+    pub fn reset(&mut self) {
+        self.input_buffer = dasp_ring_buffer::Fixed::from([0.0; 3]);
+        self.output_buffer = dasp_ring_buffer::Fixed::from([0.0; 2]);
+    }
 }
 
 pub struct IIRBiquadCoefficients {
@@ -71,6 +79,7 @@ impl IIRBiquad {
 
     pub fn change_kind(&mut self, kind: IIRBiquadKind) {
         self.kind = kind;
+        self.processors.iter_mut().for_each(|p| p.reset());
     }
 
     pub fn change_sample_rate(&mut self, sample_rate: f32) {
@@ -138,9 +147,12 @@ mod tests {
         use hound;
         let mut reader = hound::WavReader::open("wav/sine_500hz_3500hz.wav").unwrap();
         let spec = reader.spec();
-        let samples: Vec<f32> = reader.samples().map(|x: Result<i16, hound::Error>| {
-            x.unwrap() as f32 / i16::MAX as f32
-        }).collect();
+        let samples: Vec<f32> = reader
+            .samples::<i16>()
+            .filter_map(|x| x.ok())
+            .map(Sample::to_sample::<f32>)
+            .collect();
+
         let mut iir_biquad = IIRBiquad::new(
             IIRBiquadKind::LPF,
             1000.0,
