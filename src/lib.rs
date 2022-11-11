@@ -1,8 +1,10 @@
 use std::f32::consts::PI;
+use std::borrow::BorrowMut;
 use dasp_ring_buffer;
 use dasp_signal::{self as signal, Signal};
 use dasp_sample::Sample;
-use dasp_frame::Frame;
+use dasp_frame::{Frame, NumChannels, Mono};
+use dasp_slice;
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum IIRBiquadKind {
@@ -136,13 +138,17 @@ impl IIRBiquad {
     }
 
     // TODO: use dasp_frame
-    pub fn process(&mut self, input: Vec<f32>) -> Vec<f32> {
-        self.processors.iter_mut()
-        .zip(input.iter())
-        .map(|(p, i)| {
-            p.process(*i, &self.coefs)
-        })
-        .collect::<Vec<f32>>()
+    pub fn process<F>(&mut self, input: F) -> F
+    where
+        F: Frame<NumChannels = dasp_frame::N1, Sample = f32>
+    {
+        Frame::from_samples(
+            input
+            .channels()
+            .zip(self.processors.iter_mut())
+            .map(|(i, p)| p.process(f32::from_sample(i), &self.coefs))
+            .borrow_mut()
+        ).unwrap()
     }
 }
 
@@ -155,11 +161,6 @@ mod tests {
         use hound;
         let mut reader = hound::WavReader::open("wav/sine_500hz_3500hz.wav").unwrap();
         let spec = reader.spec();
-        let samples: Vec<f32> = reader
-            .samples::<i16>()
-            .filter_map(|x| x.ok())
-            .map(Sample::to_sample::<f32>)
-            .collect();
 
         let mut iir_biquad = IIRBiquad::new(
             IIRBiquadKind::LPF,
@@ -169,20 +170,29 @@ mod tests {
             spec.sample_rate as f32
         );
 
+        let samples: Vec<f32> = reader
+            .samples::<i16>()
+            .filter_map(|x| x.ok())
+            .map(Sample::to_sample::<f32>)
+            .collect();
+        //let frames = dasp_slice::from_sample_slice::<&[[f32; 1]], f32>(&samples).unwrap();
+
         // apply low-pass filter
-        let lowpassed: Vec<Vec<f32>> = samples.iter().map(|s| iir_biquad.process(vec![*s])).collect();
+        //let lowpassed: Vec<Vec<f32>> = samples.iter().map(|s| iir_biquad.process(vec![*s])).collect();
         let mut writer = hound::WavWriter::create("wav/lowpass.wav", spec).unwrap();
-        for s in lowpassed.iter() {
-            writer.write_sample((i16::MAX as f32 * s[0]) as i16).unwrap();
+        let mut sig = dasp_signal::from_iter(samples.iter().cloned());
+        while !sig.is_exhausted() {
+            let filtered_frame = iir_biquad.process(sig.next());
+            writer.write_sample(filtered_frame.to_sample::<i16>()).unwrap();
         }
         
         // apply high-pass filter
         iir_biquad.change_kind(IIRBiquadKind::HPF);
-        let highpassed: Vec<Vec<f32>> = samples.iter().map(|s| iir_biquad.process(vec![*s])).collect();
         let mut writer = hound::WavWriter::create("wav/highpass.wav", spec).unwrap();
-        for s in highpassed.iter() {
-            writer.write_sample((i16::MAX as f32 * s[0]) as i16).unwrap();
+        let mut sig = dasp_signal::from_iter(samples.iter().cloned());
+        while !sig.is_exhausted() {
+            let filtered_frame = iir_biquad.process(sig.next());
+            writer.write_sample(filtered_frame.to_sample::<i16>()).unwrap();
         }
-
     }
 }
