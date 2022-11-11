@@ -54,55 +54,8 @@ pub struct IIRBiquadCoefficients {
     b: [f32; 3],
 }
 
-pub struct IIRBiquad {
-    kind: IIRBiquadKind,
-    fc: f32,
-    q: f32,
-    coefs: IIRBiquadCoefficients,
-    processors: Vec<IIRBiquadProcessor>,
-    sample_rate: f32,
-}
-
-impl IIRBiquad {
-    pub fn new(kind: IIRBiquadKind, fc: f32, q: f32, channel: IIRBiquadChannel, sample_rate: f32) -> Self {
-        let coefs = Self::_calc_coefs(kind, fc, q, sample_rate);
-        let processors = vec![IIRBiquadProcessor::new(); channel as usize];
-        IIRBiquad {
-            kind,
-            fc,
-            q,
-            coefs,
-            processors,
-            sample_rate,
-        }
-    }
-
-    pub fn update(&mut self, fc: f32, q: f32) {
-        self.coefs = Self::_calc_coefs(self.kind, fc, q, self.sample_rate);
-    }
-
-    pub fn change_kind(&mut self, kind: IIRBiquadKind) {
-        self.kind = kind;
-        self.update(self.fc, self.q);
-        self.processors.iter_mut().for_each(|p| p.reset());
-    }
-
-    pub fn change_sample_rate(&mut self, sample_rate: f32) {
-        self.sample_rate = sample_rate;
-        self.update(self.fc, self.q);
-    }
-
-    // TODO: use dasp_frame
-    pub fn process(&mut self, input: Vec<f32>) -> Vec<f32> {
-        self.processors.iter_mut()
-        .zip(input.iter())
-        .map(|(p, i)| {
-            p.process(*i, &self.coefs)
-        })
-        .collect::<Vec<f32>>()
-    }
-
-    fn _calc_coefs(kind: IIRBiquadKind, fc: f32, q: f32, sample_rate: f32) -> IIRBiquadCoefficients {
+impl IIRBiquadCoefficients {
+    pub fn new(kind: IIRBiquadKind, fc: f32, q: f32, sample_rate: f32) -> Self {
         let fc = 0.5 * (fc * PI / sample_rate).tan() / PI;
         let mut a = [0.0; 2];
         let mut b = [0.0; 3];
@@ -140,7 +93,56 @@ impl IIRBiquad {
                 b[2] = (4.0 * PI * PI * fc * fc + 1.0) / denom; 
             }
         }
-        IIRBiquadCoefficients { a, b }
+        IIRBiquadCoefficients{ a, b }
+    }
+}
+
+pub struct IIRBiquad {
+    kind: IIRBiquadKind,
+    fc: f32,
+    q: f32,
+    coefs: IIRBiquadCoefficients,
+    processors: Vec<IIRBiquadProcessor>,
+    sample_rate: f32,
+}
+
+impl IIRBiquad {
+    pub fn new(kind: IIRBiquadKind, fc: f32, q: f32, channel: IIRBiquadChannel, sample_rate: f32) -> Self {
+        let coefs = IIRBiquadCoefficients::new(kind, fc, q, sample_rate);
+        let processors = vec![IIRBiquadProcessor::new(); channel as usize];
+        IIRBiquad {
+            kind,
+            fc,
+            q,
+            coefs,
+            processors,
+            sample_rate,
+        }
+    }
+
+    pub fn update(&mut self, fc: f32, q: f32) {
+        self.coefs = IIRBiquadCoefficients::new(self.kind, fc, q, self.sample_rate);
+    }
+
+    pub fn change_kind(&mut self, kind: IIRBiquadKind) {
+        self.kind = kind;
+        self.update(self.fc, self.q);
+        self.processors.iter_mut().for_each(|p| p.reset());
+    }
+
+    pub fn change_sample_rate(&mut self, sample_rate: f32) {
+        self.sample_rate = sample_rate;
+        self.update(self.fc, self.q);
+    }
+
+    // TODO: use dasp_frame
+    pub fn process(&mut self, input: Vec<f32>) -> Vec<f32> {
+        self.processors.iter_mut()
+        .zip(input.iter())
+        .map(|(p, i)| {
+            p.process(*i, &self.coefs)
+        })
+        .collect::<Vec<f32>>()
     }
 }
 
