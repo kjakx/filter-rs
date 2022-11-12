@@ -140,13 +140,14 @@ impl IIRBiquad {
     // TODO: use dasp_frame
     pub fn process<F>(&mut self, input: F) -> F
     where
-        F: Frame<NumChannels = dasp_frame::N1, Sample = f32>
+        //F: Frame<NumChannels = dasp_frame::N1, Sample = f32>
+        F: Frame<Sample = f32>
     {
         Frame::from_samples(
             input
             .channels()
             .zip(self.processors.iter_mut())
-            .map(|(i, p)| p.process(f32::from_sample(i), &self.coefs))
+            .map(|(i, p)| p.process(i, &self.coefs))
             .borrow_mut()
         ).unwrap()
     }
