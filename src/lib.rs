@@ -132,6 +132,7 @@ impl IIRBiquad {
     pub fn change_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate;
         self.update(self.fc, self.q);
+        self.processors.iter_mut().for_each(|p| p.reset());
     }
 
     pub fn process<F>(&mut self, input: F) -> F
